@@ -1,0 +1,131 @@
+services:
+#  db:## pour un seul conteneur avec multi bases des données
+#    container_name: postgres-container
+#    image: postgres
+#    ports:
+#      - '5432:5432'
+#    expose:
+#      - '5432'
+#    env_file:
+#      - .env
+#    volumes:
+#      - ./init-multi-postgres-databases.sh:/docker-entrypoint-initdb.d/init-multi-postgres-databases.sh
+#    restart: unless-stopped
+
+  postgres-image-service:
+    container_name: postgres-container
+    image: postgres
+    ports:
+      - '5432:5432'
+    expose:
+      - '5432'
+    environment:
+      - POSTGRES_USER=zorgani
+      - POSTGRES_PASSWORD=mz20104522
+      - POSTGRES_DB=bankingdb
+    volumes:
+      - postgres:/var/lib/postgres/data
+    restart: unless-stopped
+
+  discovery-image-service:
+    build: ./discovery
+    container_name: discovery-container
+    image: discovery-image
+    ports:
+      - '8761:8761'
+    expose:
+      - '8761'
+    environment:
+      - DISCOVERY_SERVICE_URL=http://localhost:8761/eureka
+    healthcheck:
+      test: ["CMD","curl","-f","http://localhost:8761/actuator/health"]
+      retries: 4
+      interval: 10s
+
+  config-image-service:
+    build: ./config
+    container_name: config-container
+    image: config-image
+    ports:
+      - '8888:8888'
+    expose:
+      - '8888'
+    environment:
+      - DISCOVERY_SERVICE_URL=http://discovery-image-service:8761/eureka
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8888/actuator/health" ]
+      retries: 4
+      interval: 10s
+    depends_on:
+      discovery-image-service:
+        condition: service_healthy
+
+  gateway-image-service:
+    build: ./gateway
+    container_name: gateway-container
+    image: gateway-image
+    ports:
+      - '8222:8222'
+    expose:
+      - '8222'
+    environment:
+      - DISCOVERY_SERVICE_URL=http://discovery-image-service:8761/eureka
+      - CONFIG_SERVICE_URL=http://config-image-service:8888
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8222/actuator/health" ]
+      retries: 4
+      interval: 10s
+    depends_on:
+      config-image-service:
+        condition: service_healthy
+
+  customer-image-service:
+    build: ./customer
+    container_name: customer-container
+    image: customer-image
+    ports:
+      - '8070:8070'
+    expose:
+      - '8070'
+    environment:
+      - DISCOVERY_SERVICE_URL=http://discovery-image-service:8761/eureka
+      - CONFIG_SERVICE_URL=http://config-image-service:8888
+      - ACCOUNT_SERVICE_URL=http://gateway-image-service:8222/ACCOUNT/api/v1/accounts
+    healthcheck:
+      test: [ "CMD","curl","-f","http://localhost:8070/actuator/health" ]
+      retries: 4
+      interval: 10s
+    depends_on:
+      postgres-image-service:
+        condition: service_started
+      gateway-image-service:
+        condition: service_healthy
+
+  account-image-service:
+    build: ./account
+    container_name: account-container
+    image: account-image
+    ports:
+      - '8090:8090'
+    expose:
+      - '8090'
+    environment:
+      - CONFIG_SERVICE_URL=http://config-image-service:8888
+      - DISCOVERY_SERVICE_URL=http://discovery-image-service:8761/eureka
+      - CUSTOMER_SERVICE_URL=http://gateway-image-service:8222/CUSTOMER/api/v1/customers
+    depends_on:
+      postgres-image-service:
+        condition: service_started
+      customer-image-service:
+        condition: service_healthy
+
+  angular-service-image:
+    build: ./angular-account-customer-app
+    container_name: angular-container
+    ports:
+      - '80:80'
+    expose:
+      - '80'
+
+volumes:
+  postgres:
